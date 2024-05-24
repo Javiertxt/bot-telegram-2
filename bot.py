@@ -99,6 +99,7 @@ def set_schedule(update: Update, context: CallbackContext) -> int:
         return ConversationHandler.END
     except ValueError:
         update.message.reply_text('Formato de fecha y hora inválido. Por favor, inténtalo de nuevo en formato YYYY-MM-DD HH:MM.')
+        return SCHEDULE
 
 def post_publication(bot, job):
     data = job.context
@@ -148,8 +149,9 @@ def view_scheduled(update: Update, context: CallbackContext) -> None:
 def delete_scheduled(update: Update, context: CallbackContext) -> None:
     try:
         index = int(update.message.text.split()[1]) - 1
-        if 0 <= index < len(scheduled_posts):
-            del scheduled_posts[index]
+        future_posts = [post for post in scheduled_posts if post['schedule'] > datetime.now(pytz.utc)]
+        if 0 <= index < len(future_posts):
+            del future_posts[index]
             update.message.reply_text('Publicación eliminada.')
         else:
             update.message.reply_text('Índice inválido.')
@@ -159,9 +161,10 @@ def delete_scheduled(update: Update, context: CallbackContext) -> None:
 def edit_scheduled(update: Update, context: CallbackContext) -> None:
     try:
         index = int(update.message.text.split()[1]) - 1
-        if 0 <= index < len(scheduled_posts):
-            context.user_data.update(scheduled_posts[index])
-            del scheduled_posts[index]
+        future_posts = [post for post in scheduled_posts if post['schedule'] > datetime.now(pytz.utc)]
+        if 0 <= index < len(future_posts):
+            context.user_data.update(future_posts[index])
+            del future_posts[index]
             update.message.reply_text('Vamos a editar la publicación. Proporciona los nuevos datos.')
             return NAME
         else:
@@ -172,8 +175,9 @@ def edit_scheduled(update: Update, context: CallbackContext) -> None:
 def previsualize_scheduled(update: Update, context: CallbackContext) -> None:
     try:
         index = int(update.message.text.split()[1]) - 1
-        if 0 <= index < len(scheduled_posts):
-            post = scheduled_posts[index]
+        future_posts = [post for post in scheduled_posts if post['schedule'] > datetime.now(pytz.utc)]
+        if 0 <= index < len(future_posts):
+            post = future_posts[index]
             text = generate_post_text(post)
             update.message.reply_text(f'Previsualización de la publicación:\n\n{text}', parse_mode=ParseMode.HTML)
         else:
@@ -227,4 +231,3 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-
