@@ -1,6 +1,6 @@
 import logging
 from telegram import Bot, Update, ParseMode
-from telegram.ext import CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler, Dispatcher
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 import pytz
@@ -11,15 +11,16 @@ from flask import Flask, request
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TOKEN = os.getenv('YOUR_BOT_API_TOKEN')
-PORT = int(os.environ.get('PORT', '8443'))
-APP_NAME = os.environ.get('HEROKU_APP_NAME')
-
-app = Flask(__name__)
-scheduler = BackgroundScheduler()
 
 CHANNEL, NAME, TITLE, DESCRIPTION, COUPON, OFFER_PRICE, OLD_PRICE, LINK, IMAGE, SCHEDULE_OPTION, SCHEDULE = range(11)
 
 scheduled_posts = []
+
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return "Bot is running"
 
 def start(update: Update, context: CallbackContext) -> int:
     update.message.reply_text('¡Hola! Vamos a crear una nueva publicación.\nPor favor, dime el ID del canal donde deseas publicar.')
@@ -113,7 +114,7 @@ def post_publication(bot, job):
         bot.send_photo(chat_id=data['channel'], photo=data['image'], caption=text, parse_mode=ParseMode.HTML)
     elif data['image_type'] == 'link':
         bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
-    scheduled_posts.remove(data)  # Remove the post from the list after publishing
+    scheduled_posts.remove(data)
 
 def schedule_post(data, immediate=False):
     bot = Bot(token=TOKEN)
@@ -169,73 +170,43 @@ def edit_scheduled(update: Update, context: CallbackContext) -> None:
             context.user_data.update(scheduled_posts[index])
             del scheduled_posts[index]
             update.message.reply_text('Vamos a editar la publicación. Proporciona los nuevos datos.')
-            return NAME
+            return TITLE
         else:
             update.message.reply_text('Índice inválido.')
     except (IndexError, ValueError):
         update.message.reply_text('Por favor, proporciona el índice de la publicación a editar, por ejemplo: /edit 1')
 
-def previsualize_scheduled(update: Update, context: CallbackContext) -> None:
-    try:
-        index = int(update.message.text.split()[1]) - 1
-        if 0 <= index < len(scheduled_posts):
-            post = scheduled_posts[index]
-            text = generate_post_text(post)
-            update.message.reply_text(f'Previsualización de la publicación:\n\n{text}', parse_mode=ParseMode.HTML)
-        else:
-            update.message.reply_text('Índice inválido.')
-    except (IndexError, ValueError):
-        update.message.reply_text('Por favor, proporciona el índice de la publicación a previsualizar, por ejemplo: /preview 1')
+    return ConversationHandler.END
 
-def help_command(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text('Comandos disponibles:\n'
-                              '/start - Crear una nueva publicación\n'
-                              '/view - Ver publicaciones programadas\n'
-                              '/delete [número] - Eliminar una publicación programada\n'
-                              '/edit [número] - Editar una publicación programada\n'
-                              '/preview [número] - Previsualizar una publicación programada\n'
-                              '/help - Mostrar este mensaje de ayuda')
+updater = Updater(token=TOKEN, use_context=True)
+dispatcher = updater.dispatcher
+scheduler = BackgroundScheduler(timezone=pytz.utc)
+scheduler.start()
 
-def main() -> None:
-    bot = Bot(token=TOKEN)
-    global scheduler
-    scheduler.start()
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler('start', start)],
+    states={
+        CHANNEL: [MessageHandler(Filters.text & ~Filters.command, get_channel)],
+        NAME: [MessageHandler(Filters.text & ~Filters.command, get_name)],
+        TITLE: [MessageHandler(Filters.text & ~Filters.command, get_title)],
+        DESCRIPTION: [MessageHandler(Filters.text & ~Filters.command, get_description)],
+        COUPON: [MessageHandler(Filters.text & ~Filters.command, get_coupon)],
+        OFFER_PRICE: [MessageHandler(Filters.text & ~Filters.command, get_offer_price)],
+        OLD_PRICE: [MessageHandler(Filters.text & ~Filters.command, get_old_price)],
+        LINK: [MessageHandler(Filters.text & ~Filters.command, get_link)],
+        IMAGE: [MessageHandler(Filters.text & ~Filters.command, get_image)],
+        SCHEDULE_OPTION: [MessageHandler(Filters.text & ~Filters.command, get_schedule_option)],
+        SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, set_schedule)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)]
+)
 
-    dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            CHANNEL: [MessageHandler(Filters.text & ~Filters.command, get_channel)],
-            NAME: [MessageHandler(Filters.text & ~Filters.command, get_name)],
-            TITLE: [MessageHandler(Filters.text & ~Filters.command, get_title)],
-            DESCRIPTION: [MessageHandler(Filters.text & ~Filters.command, get_description)],
-            COUPON: [MessageHandler(Filters.text & ~Filters.command, get_coupon)],
-            OFFER_PRICE: [MessageHandler(Filters.text & ~Filters.command, get_offer_price)],
-            OLD_PRICE: [MessageHandler(Filters.text & ~Filters.command, get_old_price)],
-            LINK: [MessageHandler(Filters.text & ~Filters.command, get_link)],
-            IMAGE: [MessageHandler(Filters.photo | Filters.text & ~Filters.command, get_image)],
-            SCHEDULE_OPTION: [MessageHandler(Filters.text & ~Filters.command, get_schedule_option)],
-            SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, set_schedule)]
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-
-    dispatcher.add_handler(conv_handler)
-    dispatcher.add_handler(CommandHandler('view', view_scheduled))
-    dispatcher.add_handler(CommandHandler('delete', delete_scheduled))
-    dispatcher.add_handler(CommandHandler('edit', edit_scheduled))
-    dispatcher.add_handler(CommandHandler('preview', previsualize_scheduled))
-    dispatcher.add_handler(CommandHandler('help', help_command))
-
-    bot.set_webhook(f'https://{APP_NAME}.herokuapp.com/{TOKEN}')
-    app.run(host='0.0.0.0', port=PORT)
-
-@app.route(f'/{TOKEN}', methods=['POST'])
-def webhook() -> None:
-    update = Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
-    return 'ok'
+dispatcher.add_handler(conv_handler)
+dispatcher.add_handler(CommandHandler('view', view_scheduled))
+dispatcher.add_handler(CommandHandler('delete', delete_scheduled))
+dispatcher.add_handler(CommandHandler('edit', edit_scheduled))
 
 if __name__ == '__main__':
-    main()
+    from os import environ
+    PORT = int(environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=PORT)
