@@ -1,6 +1,6 @@
 import logging
 from telegram import Bot, Update, ParseMode
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler, Dispatcher
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 import pytz
@@ -8,20 +8,31 @@ import os
 from datetime import datetime
 from flask import Flask, request
 
+# Configurar el logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv('YOUR_BOT_API_TOKEN')
+HEROKU_APP_NAME = os.getenv('HEROKU_APP_NAME')
 
 CHANNEL, NAME, TITLE, DESCRIPTION, COUPON, OFFER_PRICE, OLD_PRICE, LINK, IMAGE, SCHEDULE_OPTION, SCHEDULE = range(11)
 
 scheduled_posts = []
 
+# Crear la aplicación Flask
 app = Flask(__name__)
 
 @app.route('/')
 def index():
     return "Bot is running"
 
+@app.route('/' + TOKEN, methods=['POST'])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    dispatcher.process_update(update)
+    return 'ok'
+
+# Funciones del bot de Telegram
 def start(update: Update, context: CallbackContext) -> int:
     update.message.reply_text('¡Hola! Vamos a crear una nueva publicación.\nPor favor, dime el ID del canal donde deseas publicar.')
     return CHANNEL
@@ -178,11 +189,11 @@ def edit_scheduled(update: Update, context: CallbackContext) -> None:
 
     return ConversationHandler.END
 
-updater = Updater(token=TOKEN, use_context=True)
-dispatcher = updater.dispatcher
-scheduler = BackgroundScheduler(timezone=pytz.utc)
-scheduler.start()
+# Inicializar el bot y el dispatcher
+bot = Bot(token=TOKEN)
+dispatcher = Dispatcher(bot, None, workers=0)
 
+# Configurar los manejadores del bot
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler('start', start)],
     states={
@@ -206,7 +217,14 @@ dispatcher.add_handler(CommandHandler('view', view_scheduled))
 dispatcher.add_handler(CommandHandler('delete', delete_scheduled))
 dispatcher.add_handler(CommandHandler('edit', edit_scheduled))
 
+scheduler = BackgroundScheduler(timezone=pytz.utc)
+scheduler.start()
+
+# Configurar el webhook de Telegram
+bot.set_webhook(f"https://{HEROKU_APP_NAME}.herokuapp.com/{TOKEN}")
+
 if __name__ == '__main__':
     from os import environ
     PORT = int(environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=PORT)
+
