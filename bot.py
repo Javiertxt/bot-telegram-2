@@ -5,10 +5,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 import pytz
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask, request
 from telegram.error import RetryAfter, NetworkError, TelegramError
-import time
 
 # Configurar el logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -152,7 +151,6 @@ def schedule_post(data, immediate=False):
                 bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
         except RetryAfter as e:
             logger.warning(f"Flood control exceeded. Retry in {e.retry_after} seconds.")
-            time.sleep(e.retry_after)
             schedule_post(data, immediate=True)
         except NetworkError as e:
             logger.error(f"Network error occurred: {e}. Retrying in 60 seconds.")
@@ -180,45 +178,19 @@ def cancel(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 def view_scheduled(update: Update, context: CallbackContext) -> None:
-    if not scheduled_posts:
-        update.message.reply_text('No hay publicaciones programadas.')
+    if scheduled_posts:
+        messages = [generate_post_text(post) + f"\nProgramado para: {post['schedule'].strftime('%Y-%m-%d %H:%M:%S')}" for post in scheduled_posts]
+        update.message.reply_text('\n\n'.join(messages), parse_mode=ParseMode.HTML)
     else:
-        message = 'Publicaciones programadas:\n'
-        for i, post in enumerate(scheduled_posts, 1):
-            message += f"{i}. {post['title']} - {post['schedule']}\n"
-        update.message.reply_text(message)
-
-def delete_scheduled(update: Update, context: CallbackContext) -> None:
-    try:
-        index = int(update.message.text.split()[1]) - 1
-        if 0 <= index < len(scheduled_posts):
-            del scheduled_posts[index]
-            update.message.reply_text('Publicación eliminada.')
-        else:
-            update.message.reply_text('Índice inválido.')
-    except (IndexError, ValueError):
-        update.message.reply_text('Por favor, proporciona el índice de la publicación a eliminar, por ejemplo: /delete 1')
-
-def edit_scheduled(update: Update, context: CallbackContext) -> None:
-    try:
-        index = int(update.message.text.split()[1]) - 1
-        if 0 <= index < len(scheduled_posts):
-            context.user_data.update(scheduled_posts[index])
-            del scheduled_posts[index]
-            update.message.reply_text('Vamos a editar la publicación. Proporciona los nuevos datos.')
-            return TITLE
-        else:
-            update.message.reply_text('Índice inválido.')
-    except (IndexError, ValueError):
-        update.message.reply_text('Por favor, proporciona el índice de la publicación a editar, por ejemplo: /edit 1')
-
-    return ConversationHandler.END
-
-# Inicializar el bot y el dispatcher
-bot = Bot(token=TOKEN)
-dispatcher = Dispatcher(bot, None, workers=0)
+        update.message.reply_text('No hay publicaciones programadas.')
 
 # Configurar los manejadores del bot
+bot = Bot(token=TOKEN)
+dispatcher = Dispatcher(bot, None, workers=4)
+scheduler = BackgroundScheduler(timezone=pytz.utc)
+scheduler.start()
+
+# Configuración del ConversationHandler
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler('start', start)],
     states={
@@ -230,7 +202,7 @@ conv_handler = ConversationHandler(
         OFFER_PRICE: [MessageHandler(Filters.text & ~Filters.command, get_offer_price)],
         OLD_PRICE: [MessageHandler(Filters.text & ~Filters.command, get_old_price)],
         LINK: [MessageHandler(Filters.text & ~Filters.command, get_link)],
-        IMAGE: [MessageHandler(Filters.text & ~Filters.command, get_image)],
+        IMAGE: [MessageHandler(Filters.photo | (Filters.text & ~Filters.command), get_image)],
         SCHEDULE_OPTION: [MessageHandler(Filters.text & ~Filters.command, get_schedule_option)],
         SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, set_schedule)],
     },
@@ -238,15 +210,11 @@ conv_handler = ConversationHandler(
 )
 
 dispatcher.add_handler(conv_handler)
-dispatcher.add_handler(CommandHandler('view', view_scheduled))
-dispatcher.add_handler(CommandHandler('delete', delete_scheduled))
-dispatcher.add_handler(CommandHandler('edit', edit_scheduled))
+dispatcher.add_handler(CommandHandler('scheduled', view_scheduled))
 
-scheduler = BackgroundScheduler(timezone=pytz.utc)
-scheduler.start()
-
-# Configurar el webhook de Telegram
-bot.set_webhook(f"https://{HEROKU_APP_NAME}.herokuapp.com/{TOKEN}")
+# Establecer el webhook
+if HEROKU_APP_NAME and TOKEN:
+    bot.set_webhook(f"https://{HEROKU_APP_NAME}.herokuapp.com/{TOKEN}")
 
 if __name__ == '__main__':
     from os import environ
