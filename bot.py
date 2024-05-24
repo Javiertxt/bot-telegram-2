@@ -81,7 +81,7 @@ def get_schedule_option(update: Update, context: CallbackContext) -> int:
         update.message.reply_text('La publicación se ha realizado inmediatamente.')
         return ConversationHandler.END
     elif update.message.text.lower() == 'programar':
-        now = datetime.now(pytz.utc).strftime('%Y-%m-%d %H:%M')
+        now = datetime.now(pytz.timezone('Europe/Madrid')).strftime('%Y-%m-%d %H:%M')
         update.message.reply_text(f'Por favor, proporciona la fecha y hora de la publicación en formato YYYY-MM-DD HH:MM. Hora actual: {now}')
         return SCHEDULE
     else:
@@ -91,8 +91,9 @@ def get_schedule_option(update: Update, context: CallbackContext) -> int:
 def set_schedule(update: Update, context: CallbackContext) -> int:
     try:
         schedule_time = datetime.strptime(update.message.text, '%Y-%m-%d %H:%M')
+        schedule_time = pytz.timezone('Europe/Madrid').localize(schedule_time)
         context.user_data['schedule'] = schedule_time
-        scheduled_posts.append(context.user_data)
+        scheduled_posts.append(context.user_data.copy())
         schedule_post(context.user_data)
         update.message.reply_text('La publicación ha sido programada.')
         return ConversationHandler.END
@@ -132,7 +133,7 @@ def generate_post_text(data):
             f"<b>➡️CUPÓN: {data['coupon']}</b>\n\n"
             f"<b>✅OFERTA: {data['offer_price']}</b>\n\n"
             f"<b>❌ANTES: <s>{data['old_price']}</s></b>\n\n"
-            f"{data['link']}\n\n")
+            f"{data['link']}")
 
 def cancel(update: Update, context: CallbackContext) -> int:
     update.message.reply_text('Operación cancelada.')
@@ -141,7 +142,8 @@ def cancel(update: Update, context: CallbackContext) -> int:
 def view_scheduled(update: Update, context: CallbackContext) -> None:
     if scheduled_posts:
         for i, post in enumerate(scheduled_posts):
-            update.message.reply_text(f"{i + 1}. {post['title']} programado para {post['schedule']}")
+            local_time = post['schedule'].astimezone(pytz.timezone('Europe/Madrid')).strftime('%Y-%m-%d %H:%M')
+            update.message.reply_text(f"{i + 1}. {post['title']} programado para {local_time}")
     else:
         update.message.reply_text('No hay publicaciones programadas.')
 
@@ -182,10 +184,11 @@ def previsualize_scheduled(update: Update, context: CallbackContext) -> None:
         update.message.reply_text('Por favor, proporciona el índice de la publicación a previsualizar, por ejemplo: /preview 1')
 
 def help_command(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text('/view - Ver publicaciones programadas\n'
-                              '/delete <número> - Eliminar publicación programada\n'
-                              '/edit <número> - Editar publicación programada\n'
-                              '/preview <número> - Previsualizar publicación programada\n'
+    update.message.reply_text('/start - Iniciar una nueva publicación\n'
+                              '/view - Ver publicaciones programadas\n'
+                              '/delete <número> - Eliminar una publicación programada\n'
+                              '/edit <número> - Editar una publicación programada\n'
+                              '/preview <número> - Previsualizar una publicación programada\n'
                               '/cancel - Cancelar la operación actual')
 
 def main() -> None:
@@ -226,4 +229,3 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-
