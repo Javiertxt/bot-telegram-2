@@ -7,6 +7,7 @@ import pytz
 import os
 from datetime import datetime
 from flask import Flask, request
+from telegram.error import RetryAfter, NetworkError, TelegramError
 
 # Configurar el logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -121,21 +122,44 @@ def set_schedule(update: Update, context: CallbackContext) -> int:
 def post_publication(bot, job):
     data = job.context
     text = generate_post_text(data)
-    if data['image_type'] == 'file':
-        bot.send_photo(chat_id=data['channel'], photo=data['image'], caption=text, parse_mode=ParseMode.HTML)
-    elif data['image_type'] == 'link':
-        bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
-    scheduled_posts.remove(data)
+    try:
+        if data['image_type'] == 'file':
+            bot.send_photo(chat_id=data['channel'], photo=data['image'], caption=text, parse_mode=ParseMode.HTML)
+        elif data['image_type'] == 'link':
+            bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
+        scheduled_posts.remove(data)
+    except RetryAfter as e:
+        logger.warning(f"Flood control exceeded. Retry in {e.retry_after} seconds.")
+        job.reschedule(DateTrigger(run_date=datetime.now(pytz.utc) + timedelta(seconds=e.retry_after)))
+    except NetworkError as e:
+        logger.error(f"Network error occurred: {e}. Rescheduling job.")
+        job.reschedule(DateTrigger(run_date=datetime.now(pytz.utc) + timedelta(seconds=60)))
+    except TelegramError as e:
+        logger.error(f"Telegram error occurred: {e}.")
+    except Exception as e:
+        logger.error(f"Unexpected error occurred: {e}.")
 
 def schedule_post(data, immediate=False):
     bot = Bot(token=TOKEN)
     text = generate_post_text(data)
     
     if immediate:
-        if data['image_type'] == 'file':
-            bot.send_photo(chat_id=data['channel'], photo=data['image'], caption=text, parse_mode=ParseMode.HTML)
-        elif data['image_type'] == 'link':
-            bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
+        try:
+            if data['image_type'] == 'file':
+                bot.send_photo(chat_id=data['channel'], photo=data['image'], caption=text, parse_mode=ParseMode.HTML)
+            elif data['image_type'] == 'link':
+                bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
+        except RetryAfter as e:
+            logger.warning(f"Flood control exceeded. Retry in {e.retry_after} seconds.")
+            schedule_post(data, immediate=True)
+        except NetworkError as e:
+            logger.error(f"Network error occurred: {e}. Retrying in 60 seconds.")
+            time.sleep(60)
+            schedule_post(data, immediate=True)
+        except TelegramError as e:
+            logger.error(f"Telegram error occurred: {e}.")
+        except Exception as e:
+            logger.error(f"Unexpected error occurred: {e}.")
     else:
         trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
         job = scheduler.add_job(post_publication, trigger, args=[bot], context=data)
@@ -154,14 +178,13 @@ def cancel(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 def view_scheduled(update: Update, context: CallbackContext) -> None:
-    now = datetime.now(pytz.utc)
-    future_posts = [post for post in scheduled_posts if post['schedule'] > now]
-    if future_posts:
-        for i, post in enumerate(future_posts):
-            local_time = post['schedule'].astimezone(pytz.timezone('Europe/Madrid')).strftime('%Y-%m-%d %H:%M')
-            update.message.reply_text(f"{i + 1}. {post['title']} programado para {local_time}")
-    else:
+    if not scheduled_posts:
         update.message.reply_text('No hay publicaciones programadas.')
+    else:
+        message = 'Publicaciones programadas:\n'
+        for i, post in enumerate(scheduled_posts, 1):
+            message += f"{i}. {post['title']} - {post['schedule']}\n"
+        update.message.reply_text(message)
 
 def delete_scheduled(update: Update, context: CallbackContext) -> None:
     try:
@@ -227,4 +250,3 @@ if __name__ == '__main__':
     from os import environ
     PORT = int(environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=PORT)
-
