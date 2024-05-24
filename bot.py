@@ -5,9 +5,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 import pytz
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, request
 from telegram.error import RetryAfter, NetworkError, TelegramError
+import time
 
 # Configurar el logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -151,6 +152,7 @@ def schedule_post(data, immediate=False):
                 bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
         except RetryAfter as e:
             logger.warning(f"Flood control exceeded. Retry in {e.retry_after} seconds.")
+            time.sleep(e.retry_after)
             schedule_post(data, immediate=True)
         except NetworkError as e:
             logger.error(f"Network error occurred: {e}. Retrying in 60 seconds.")
