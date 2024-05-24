@@ -4,29 +4,26 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 import pytz
+import os
 
-# Configuración básica de logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Definición de constantes para los estados del conversacional
+# Obtener el token desde las variables de entorno
+TOKEN = os.getenv('YOUR_BOT_API_TOKEN')
+
 NAME, TITLE, DESCRIPTION, COUPON, OFFER_PRICE, OLD_PRICE, LINK, IMAGE, CHANNEL, SCHEDULE = range(10)
 
-# Diccionario para almacenar las publicaciones programadas
 scheduled_posts = []
 
-# Función para iniciar el bot
 def start(update: Update, context: CallbackContext) -> int:
     update.message.reply_text('¡Hola! Vamos a crear una nueva publicación.\nPor favor, dime el nombre de la tienda.')
     return NAME
 
-# Función para recibir y almacenar el nombre de la tienda
 def get_name(update: Update, context: CallbackContext) -> int:
     context.user_data['name'] = update.message.text
     update.message.reply_text('Ahora, por favor dime el título del producto.')
     return TITLE
 
-# Funciones para recibir y almacenar los otros datos
 def get_title(update: Update, context: CallbackContext) -> int:
     context.user_data['title'] = update.message.text
     update.message.reply_text('Por favor, dime la descripción del producto.')
@@ -77,7 +74,7 @@ def get_schedule(update: Update, context: CallbackContext) -> int:
         return ConversationHandler.END
 
 def schedule_post(data, immediate=False):
-    bot = Bot(token='YOUR_BOT_API_TOKEN')
+    bot = Bot(token=TOKEN)
     text = f"<b><a href='{data['link']}'>{data['name']}</a></b>\n" \
            f"<b>{data['title']}</b>\n\n" \
            f"{data['description']}\n\n" \
@@ -112,7 +109,6 @@ def cancel(update: Update, context: CallbackContext) -> int:
     update.message.reply_text('Operación cancelada.')
     return ConversationHandler.END
 
-# Configuración del comando para revisar publicaciones programadas
 def view_scheduled(update: Update, context: CallbackContext) -> None:
     if scheduled_posts:
         for i, post in enumerate(scheduled_posts):
@@ -120,7 +116,6 @@ def view_scheduled(update: Update, context: CallbackContext) -> None:
     else:
         update.message.reply_text('No hay publicaciones programadas.')
 
-# Configuración del comando para eliminar publicaciones programadas
 def delete_scheduled(update: Update, context: CallbackContext) -> None:
     try:
         index = int(update.message.text.split()[1]) - 1
@@ -132,9 +127,8 @@ def delete_scheduled(update: Update, context: CallbackContext) -> None:
     except (IndexError, ValueError):
         update.message.reply_text('Por favor, proporciona el índice de la publicación a eliminar, por ejemplo: /delete 1')
 
-# Configuración del manejador del bot y del programador de tareas
 def main():
-    updater = Updater(token='YOUR_BOT_API_TOKEN', use_context=True)
+    updater = Updater(token=TOKEN, use_context=True)
     dispatcher = updater.dispatcher
     global scheduler
     scheduler = BackgroundScheduler()
@@ -153,7 +147,7 @@ def main():
             IMAGE: [MessageHandler(Filters.photo & ~Filters.command, get_image)],
             CHANNEL: [MessageHandler(Filters.text & ~Filters.command, get_channel)],
             SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, get_schedule)],
-            'SET_SCHEDULE': [MessageHandler(Filters.text & ~Filters.command, set_schedule)],
+            SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, set_schedule)],
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )
