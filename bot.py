@@ -51,13 +51,17 @@ def get_old_price(update: Update, context: CallbackContext) -> int:
 
 def get_link(update: Update, context: CallbackContext) -> int:
     context.user_data['link'] = update.message.text
-    update.message.reply_text('Por favor, proporciona la imagen del producto.')
+    update.message.reply_text('Por favor, envía la imagen del producto.')
     return IMAGE
 
 def get_image(update: Update, context: CallbackContext) -> int:
-    context.user_data['image'] = update.message.photo[-1].get_file().file_id
-    update.message.reply_text('¿En qué canal quieres publicar? Por favor, proporciona el ID del canal.')
-    return CHANNEL
+    if update.message.photo:
+        context.user_data['image'] = update.message.photo[-1].get_file().file_id
+        update.message.reply_text('¿En qué canal quieres publicar? Por favor, proporciona el ID del canal.')
+        return CHANNEL
+    else:
+        update.message.reply_text('Por favor, envía una imagen válida.')
+        return IMAGE
 
 def get_channel(update: Update, context: CallbackContext) -> int:
     context.user_data['channel'] = update.message.text
