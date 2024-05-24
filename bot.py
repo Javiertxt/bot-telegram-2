@@ -1,6 +1,6 @@
 import logging
-from telegram import Bot, Update, ParseMode, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler, CallbackQueryHandler
+from telegram import Bot, Update, ParseMode
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 import pytz
@@ -11,7 +11,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 TOKEN = os.getenv('YOUR_BOT_API_TOKEN')
 
-CHANNEL, NAME, TITLE, DESCRIPTION, COUPON, OFFER_PRICE, OLD_PRICE, LINK, IMAGE, SCHEDULE_OPTION, SCHEDULE, CONFIRM = range(12)
+CHANNEL, NAME, TITLE, DESCRIPTION, COUPON, OFFER_PRICE, OLD_PRICE, LINK, IMAGE, SCHEDULE_OPTION, SCHEDULE = range(11)
 
 scheduled_posts = []
 
@@ -192,6 +192,7 @@ def main() -> None:
     updater = Updater(token=TOKEN)
     dispatcher = updater.dispatcher
 
+    global scheduler
     scheduler = BackgroundScheduler()
     scheduler.start()
 
@@ -208,8 +209,7 @@ def main() -> None:
             LINK: [MessageHandler(Filters.text & ~Filters.command, get_link)],
             IMAGE: [MessageHandler(Filters.photo | Filters.text & ~Filters.command, get_image)],
             SCHEDULE_OPTION: [MessageHandler(Filters.text & ~Filters.command, get_schedule_option)],
-            SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, set_schedule)],
-            CONFIRM: [MessageHandler(Filters.text & ~Filters.command, confirm_publication)]
+            SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, set_schedule)]
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )
