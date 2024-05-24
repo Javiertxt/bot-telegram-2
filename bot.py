@@ -100,31 +100,27 @@ def set_schedule(update: Update, context: CallbackContext) -> int:
     except ValueError:
         update.message.reply_text('Formato de fecha y hora inválido. Por favor, inténtalo de nuevo en formato YYYY-MM-DD HH:MM.')
 
+def post_publication(bot, job):
+    data = job.context
+    text = generate_post_text(data)
+    if data['image_type'] == 'file':
+        bot.send_photo(chat_id=data['channel'], photo=data['image'], caption=text, parse_mode=ParseMode.HTML)
+    elif data['image_type'] == 'link':
+        bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
+    scheduled_posts.remove(data)  # Remove the post from the list after publishing
+
 def schedule_post(data, immediate=False):
     bot = Bot(token=TOKEN)
     text = generate_post_text(data)
     
-    if data['image_type'] == 'file':
-        if immediate:
+    if immediate:
+        if data['image_type'] == 'file':
             bot.send_photo(chat_id=data['channel'], photo=data['image'], caption=text, parse_mode=ParseMode.HTML)
-        else:
-            trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
-            scheduler.add_job(bot.send_photo, trigger, kwargs={
-                'chat_id': data['channel'],
-                'photo': data['image'],
-                'caption': text,
-                'parse_mode': ParseMode.HTML
-            })
-    elif data['image_type'] == 'link':
-        if immediate:
+        elif data['image_type'] == 'link':
             bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
-        else:
-            trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
-            scheduler.add_job(bot.send_message, trigger, kwargs={
-                'chat_id': data['channel'],
-                'text': text + f"<a href='{data['image']}'>\u200C</a>",
-                'parse_mode': ParseMode.HTML
-            })
+    else:
+        trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
+        job = scheduler.add_job(post_publication, trigger, args=[bot], context=data)
 
 def generate_post_text(data):
     return (f"<b><a href='{data['link']}'>{data['name']}</a></b>\n\n"
@@ -140,8 +136,10 @@ def cancel(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 def view_scheduled(update: Update, context: CallbackContext) -> None:
-    if scheduled_posts:
-        for i, post in enumerate(scheduled_posts):
+    now = datetime.now(pytz.utc)
+    future_posts = [post for post in scheduled_posts if post['schedule'] > now]
+    if future_posts:
+        for i, post in enumerate(future_posts):
             local_time = post['schedule'].astimezone(pytz.timezone('Europe/Madrid')).strftime('%Y-%m-%d %H:%M')
             update.message.reply_text(f"{i + 1}. {post['title']} programado para {local_time}")
     else:
@@ -229,3 +227,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
