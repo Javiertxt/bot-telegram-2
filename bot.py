@@ -117,17 +117,17 @@ def schedule_post(data, immediate=False):
             })
     elif data['image_type'] == 'link':
         if immediate:
-            bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
+            bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>🟢</a>", parse_mode=ParseMode.HTML)
         else:
             trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
             scheduler.add_job(bot.send_message, trigger, kwargs={
                 'chat_id': data['channel'],
-                'text': text + f"<a href='{data['image']}'>\u200C</a>",
+                'text': text + f"<a href='{data['image']}'>🟢</a>",
                 'parse_mode': ParseMode.HTML
             })
 
 def generate_post_text(data):
-    return (f"<b><a href='{data['link']}'>{data['name']}</a></b>\n\n"
+    return (f"<a href='{data['image']}'>🟢</a> <b><a href='{data['link']}'>{data['name']}</a></b>\n\n"
             f"<b>{data['title']}</b>\n\n"
             f"{data['description']}\n\n"
             f"<b>➡️CUPÓN: {data['coupon']}</b>\n\n"
@@ -148,47 +148,13 @@ def view_scheduled(update: Update, context: CallbackContext) -> None:
         update.message.reply_text('No hay publicaciones programadas.')
 
 def delete_scheduled(update: Update, context: CallbackContext) -> None:
-    try:
-        index = int(update.message.text.split()[1]) - 1
-        if 0 <= index < len(scheduled_posts):
-            del scheduled_posts[index]
-            update.message.reply_text('Publicación eliminada.')
-        else:
-            update.message.reply_text('Índice inválido.')
-    except (IndexError, ValueError):
-        update.message.reply_text('Por favor, proporciona el índice de la publicación a eliminar, por ejemplo: /delete 1')
-
-def edit_scheduled(update: Update, context: CallbackContext) -> None:
-    try:
-        index = int(update.message.text.split()[1]) - 1
-        if 0 <= index < len(scheduled_posts):
-            context.user_data.update(scheduled_posts[index])
-            del scheduled_posts[index]
-            update.message.reply_text('Vamos a editar la publicación. Proporciona los nuevos datos.')
-            return NAME
-        else:
-            update.message.reply_text('Índice inválido.')
-    except (IndexError, ValueError):
-        update.message.reply_text('Por favor, proporciona el índice de la publicación a editar, por ejemplo: /edit 1')
-
-def previsualize_scheduled(update: Update, context: CallbackContext) -> None:
-    try:
-        index = int(update.message.text.split()[1]) - 1
-        if 0 <= index < len(scheduled_posts):
-            post = scheduled_posts[index]
-            text = generate_post_text(post)
-            update.message.reply_text(f'Previsualización de la publicación:\n\n{text}', parse_mode=ParseMode.HTML)
-        else:
-            update.message.reply_text('Índice inválido.')
-    except (IndexError, ValueError):
-        update.message.reply_text('Por favor, proporciona el índice de la publicación a previsualizar, por ejemplo: /preview 1')
+    scheduled_posts.clear()
+    update.message.reply_text('Todas las publicaciones programadas han sido eliminadas.')
 
 def help_command(update: Update, context: CallbackContext) -> None:
     update.message.reply_text('/start - Iniciar una nueva publicación\n'
                               '/view - Ver publicaciones programadas\n'
-                              '/delete <número> - Eliminar una publicación programada\n'
-                              '/edit <número> - Editar una publicación programada\n'
-                              '/preview <número> - Previsualizar una publicación programada\n'
+                              '/delete - Eliminar todas las publicaciones programadas\n'
                               '/cancel - Cancelar la operación actual')
 
 def main() -> None:
@@ -220,8 +186,6 @@ def main() -> None:
     dispatcher.add_handler(conv_handler)
     dispatcher.add_handler(CommandHandler('view', view_scheduled))
     dispatcher.add_handler(CommandHandler('delete', delete_scheduled))
-    dispatcher.add_handler(CommandHandler('edit', edit_scheduled))
-    dispatcher.add_handler(CommandHandler('preview', previsualize_scheduled))
     dispatcher.add_handler(CommandHandler('help', help_command))
 
     updater.start_polling()
