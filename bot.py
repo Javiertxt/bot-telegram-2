@@ -1,39 +1,20 @@
 import logging
 from telegram import Bot, Update, ParseMode
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler, Dispatcher
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 import pytz
 import os
 from datetime import datetime
-from flask import Flask, request
-from telegram.error import RetryAfter, NetworkError, TelegramError
 
-# Configurar el logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv('YOUR_BOT_API_TOKEN')
-HEROKU_APP_NAME = os.getenv('HEROKU_APP_NAME')
 
 CHANNEL, NAME, TITLE, DESCRIPTION, COUPON, OFFER_PRICE, OLD_PRICE, LINK, IMAGE, SCHEDULE_OPTION, SCHEDULE = range(11)
 
 scheduled_posts = []
 
-# Crear la aplicación Flask
-app = Flask(__name__)
-
-@app.route('/')
-def index():
-    return "Bot is running"
-
-@app.route('/' + TOKEN, methods=['POST'])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
-    return 'ok'
-
-# Funciones del bot de Telegram
 def start(update: Update, context: CallbackContext) -> int:
     update.message.reply_text('¡Hola! Vamos a crear una nueva publicación.\nPor favor, dime el ID del canal donde deseas publicar.')
     return CHANNEL
@@ -119,50 +100,31 @@ def set_schedule(update: Update, context: CallbackContext) -> int:
     except ValueError:
         update.message.reply_text('Formato de fecha y hora inválido. Por favor, inténtalo de nuevo en formato YYYY-MM-DD HH:MM.')
 
-def post_publication(bot, job):
-    data = job.context
-    text = generate_post_text(data)
-    try:
-        if data['image_type'] == 'file':
-            bot.send_photo(chat_id=data['channel'], photo=data['image'], caption=text, parse_mode=ParseMode.HTML)
-        elif data['image_type'] == 'link':
-            bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
-        scheduled_posts.remove(data)
-    except RetryAfter as e:
-        logger.warning(f"Flood control exceeded. Retry in {e.retry_after} seconds.")
-        job.reschedule(DateTrigger(run_date=datetime.now(pytz.utc) + timedelta(seconds=e.retry_after)))
-    except NetworkError as e:
-        logger.error(f"Network error occurred: {e}. Rescheduling job.")
-        job.reschedule(DateTrigger(run_date=datetime.now(pytz.utc) + timedelta(seconds=60)))
-    except TelegramError as e:
-        logger.error(f"Telegram error occurred: {e}.")
-    except Exception as e:
-        logger.error(f"Unexpected error occurred: {e}.")
-
 def schedule_post(data, immediate=False):
     bot = Bot(token=TOKEN)
     text = generate_post_text(data)
     
-    if immediate:
-        try:
-            if data['image_type'] == 'file':
-                bot.send_photo(chat_id=data['channel'], photo=data['image'], caption=text, parse_mode=ParseMode.HTML)
-            elif data['image_type'] == 'link':
-                bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
-        except RetryAfter as e:
-            logger.warning(f"Flood control exceeded. Retry in {e.retry_after} seconds.")
-            schedule_post(data, immediate=True)
-        except NetworkError as e:
-            logger.error(f"Network error occurred: {e}. Retrying in 60 seconds.")
-            time.sleep(60)
-            schedule_post(data, immediate=True)
-        except TelegramError as e:
-            logger.error(f"Telegram error occurred: {e}.")
-        except Exception as e:
-            logger.error(f"Unexpected error occurred: {e}.")
-    else:
-        trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
-        job = scheduler.add_job(post_publication, trigger, args=[bot], context=data)
+    if data['image_type'] == 'file':
+        if immediate:
+            bot.send_photo(chat_id=data['channel'], photo=data['image'], caption=text, parse_mode=ParseMode.HTML)
+        else:
+            trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
+            scheduler.add_job(bot.send_photo, trigger, kwargs={
+                'chat_id': data['channel'],
+                'photo': data['image'],
+                'caption': text,
+                'parse_mode': ParseMode.HTML
+            })
+    elif data['image_type'] == 'link':
+        if immediate:
+            bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
+        else:
+            trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
+            scheduler.add_job(bot.send_message, trigger, kwargs={
+                'chat_id': data['channel'],
+                'text': text + f"<a href='{data['image']}'>\u200C</a>",
+                'parse_mode': ParseMode.HTML
+            })
 
 def generate_post_text(data):
     return (f"<b><a href='{data['link']}'>{data['name']}</a></b>\n\n"
@@ -179,44 +141,92 @@ def cancel(update: Update, context: CallbackContext) -> int:
 
 def view_scheduled(update: Update, context: CallbackContext) -> None:
     if scheduled_posts:
-        messages = [generate_post_text(post) + f"\nProgramado para: {post['schedule'].strftime('%Y-%m-%d %H:%M:%S')}" for post in scheduled_posts]
-        update.message.reply_text('\n\n'.join(messages), parse_mode=ParseMode.HTML)
+        for i, post in enumerate(scheduled_posts):
+            local_time = post['schedule'].astimezone(pytz.timezone('Europe/Madrid')).strftime('%Y-%m-%d %H:%M')
+            update.message.reply_text(f"{i + 1}. {post['title']} programado para {local_time}")
     else:
         update.message.reply_text('No hay publicaciones programadas.')
 
-# Configurar los manejadores del bot
-bot = Bot(token=TOKEN)
-dispatcher = Dispatcher(bot, None, workers=4)
-scheduler = BackgroundScheduler(timezone=pytz.utc)
-scheduler.start()
+def delete_scheduled(update: Update, context: CallbackContext) -> None:
+    try:
+        index = int(update.message.text.split()[1]) - 1
+        if 0 <= index < len(scheduled_posts):
+            del scheduled_posts[index]
+            update.message.reply_text('Publicación eliminada.')
+        else:
+            update.message.reply_text('Índice inválido.')
+    except (IndexError, ValueError):
+        update.message.reply_text('Por favor, proporciona el índice de la publicación a eliminar, por ejemplo: /delete 1')
 
-# Configuración del ConversationHandler
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler('start', start)],
-    states={
-        CHANNEL: [MessageHandler(Filters.text & ~Filters.command, get_channel)],
-        NAME: [MessageHandler(Filters.text & ~Filters.command, get_name)],
-        TITLE: [MessageHandler(Filters.text & ~Filters.command, get_title)],
-        DESCRIPTION: [MessageHandler(Filters.text & ~Filters.command, get_description)],
-        COUPON: [MessageHandler(Filters.text & ~Filters.command, get_coupon)],
-        OFFER_PRICE: [MessageHandler(Filters.text & ~Filters.command, get_offer_price)],
-        OLD_PRICE: [MessageHandler(Filters.text & ~Filters.command, get_old_price)],
-        LINK: [MessageHandler(Filters.text & ~Filters.command, get_link)],
-        IMAGE: [MessageHandler(Filters.photo | (Filters.text & ~Filters.command), get_image)],
-        SCHEDULE_OPTION: [MessageHandler(Filters.text & ~Filters.command, get_schedule_option)],
-        SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, set_schedule)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)]
-)
+def edit_scheduled(update: Update, context: CallbackContext) -> None:
+    try:
+        index = int(update.message.text.split()[1]) - 1
+        if 0 <= index < len(scheduled_posts):
+            context.user_data.update(scheduled_posts[index])
+            del scheduled_posts[index]
+            update.message.reply_text('Vamos a editar la publicación. Proporciona los nuevos datos.')
+            return NAME
+        else:
+            update.message.reply_text('Índice inválido.')
+    except (IndexError, ValueError):
+        update.message.reply_text('Por favor, proporciona el índice de la publicación a editar, por ejemplo: /edit 1')
 
-dispatcher.add_handler(conv_handler)
-dispatcher.add_handler(CommandHandler('scheduled', view_scheduled))
+def previsualize_scheduled(update: Update, context: CallbackContext) -> None:
+    try:
+        index = int(update.message.text.split()[1]) - 1
+        if 0 <= index < len(scheduled_posts):
+            post = scheduled_posts[index]
+            text = generate_post_text(post)
+            update.message.reply_text(f'Previsualización de la publicación:\n\n{text}', parse_mode=ParseMode.HTML)
+        else:
+            update.message.reply_text('Índice inválido.')
+    except (IndexError, ValueError):
+        update.message.reply_text('Por favor, proporciona el índice de la publicación a previsualizar, por ejemplo: /preview 1')
 
-# Establecer el webhook
-if HEROKU_APP_NAME and TOKEN:
-    bot.set_webhook(f"https://{HEROKU_APP_NAME}.herokuapp.com/{TOKEN}")
+def help_command(update: Update, context: CallbackContext) -> None:
+    update.message.reply_text('/start - Iniciar una nueva publicación\n'
+                              '/view - Ver publicaciones programadas\n'
+                              '/delete <número> - Eliminar una publicación programada\n'
+                              '/edit <número> - Editar una publicación programada\n'
+                              '/preview <número> - Previsualizar una publicación programada\n'
+                              '/cancel - Cancelar la operación actual')
+
+def main() -> None:
+    updater = Updater(token=TOKEN)
+    dispatcher = updater.dispatcher
+
+    global scheduler
+    scheduler = BackgroundScheduler()
+    scheduler.start()
+
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            CHANNEL: [MessageHandler(Filters.text & ~Filters.command, get_channel)],
+            NAME: [MessageHandler(Filters.text & ~Filters.command, get_name)],
+            TITLE: [MessageHandler(Filters.text & ~Filters.command, get_title)],
+            DESCRIPTION: [MessageHandler(Filters.text & ~Filters.command, get_description)],
+            COUPON: [MessageHandler(Filters.text & ~Filters.command, get_coupon)],
+            OFFER_PRICE: [MessageHandler(Filters.text & ~Filters.command, get_offer_price)],
+            OLD_PRICE: [MessageHandler(Filters.text & ~Filters.command, get_old_price)],
+            LINK: [MessageHandler(Filters.text & ~Filters.command, get_link)],
+            IMAGE: [MessageHandler(Filters.photo | Filters.text & ~Filters.command, get_image)],
+            SCHEDULE_OPTION: [MessageHandler(Filters.text & ~Filters.command, get_schedule_option)],
+            SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, set_schedule)]
+        },
+        fallbacks=[CommandHandler('cancel', cancel)]
+    )
+
+    dispatcher.add_handler(conv_handler)
+    dispatcher.add_handler(CommandHandler('view', view_scheduled))
+    dispatcher.add_handler(CommandHandler('delete', delete_scheduled))
+    dispatcher.add_handler(CommandHandler('edit', edit_scheduled))
+    dispatcher.add_handler(CommandHandler('preview', previsualize_scheduled))
+    dispatcher.add_handler(CommandHandler('help', help_command))
+
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == '__main__':
-    from os import environ
-    PORT = int(environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=PORT)
+    main()
+
