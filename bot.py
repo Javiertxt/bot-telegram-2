@@ -1,4 +1,5 @@
 import logging
+import heapq
 from telegram import Bot, Update, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -101,51 +102,43 @@ def set_schedule(update: Update, context: CallbackContext) -> int:
         update.message.reply_text('Formato de fecha y hora inválido. Por favor, inténtalo de nuevo en formato YYYY-MM-DD HH:MM.')
 
 def schedule_post(data, immediate=False):
-    bot = Bot(token=TOKEN)
-    text = generate_post_text(data)
-    
-    if data['image_type'] == 'file':
-        if immediate:
-            bot.send_photo(chat_id=data['channel'], photo=data['image'], caption=text, parse_mode=ParseMode.HTML)
-        else:
-            trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
-            scheduler.add_job(bot.send_photo, trigger, kwargs={
-                'chat_id': data['channel'],
-                'photo': data['image'],
-                'caption': text,
-                'parse_mode': ParseMode.HTML
-            })
-    elif data['image_type'] == 'link':
-        if immediate:
-            bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>\u200C</a>", parse_mode=ParseMode.HTML)
-        else:
-            trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
-            scheduler.add_job(bot.send_message, trigger, kwargs={
-                'chat_id': data['channel'],
-                'text': text + f"<a href='{data['image']}'>\u200C</a>",
-                'parse_mode': ParseMode.HTML
-            })
+bot = Bot(token=TOKEN)
+text = generate_post_text(data)
 
-def generate_post_text(data):
-    return (f"<b><a href='{data['link']}'>{data['name']}</a></b>\n\n"
-            f"<b>{data['title']}</b>\n\n"
-            f"{data['description']}\n\n"
-            f"<b>➡️CUPÓN: {data['coupon']}</b>\n\n"
-            f"<b>✅OFERTA: {data['offer_price']}</b>\n\n"
-            f"<b>❌ANTES: <s>{data['old_price']}</s></b>\n\n"
-            f"{data['link']}")
-
-def cancel(update: Update, context: CallbackContext) -> int:
-    update.message.reply_text('Operación cancelada.')
-    return ConversationHandler.END
+if data['image_type'] == 'file':
+if immediate:
+bot.send_photo(chat_id=data['channel'], photo=data['image'], caption=text, parse_mode=ParseMode.HTML)
+else:
+trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
+job = scheduler.add_job(bot.send_photo, trigger, kwargs={
+'chat_id': data['channel'],
+'photo': data['image'],
+'caption': text,
+'parse_mode': ParseMode.HTML
+})
+data['job_id'] = job.id
+scheduled_posts.append(data.copy())
+elif data['image_type'] == 'link':
+if immediate:
+bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'></a>", parse_mode=ParseMode.HTML)
+else:
+trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
+job = scheduler.add_job(bot.send_message, trigger, kwargs={
+'chat_id': data['channel'],
+'text': text + f"<a href='{data['image']}'></a>",
+'parse_mode': ParseMode.HTML
+})
+data['job_id'] = job.id
+scheduled_posts.append(data.copy())
 
 def view_scheduled(update: Update, context: CallbackContext) -> None:
-    if scheduled_posts:
-        for i, post in enumerate(scheduled_posts):
-            local_time = post['schedule'].astimezone(pytz.timezone('Europe/Madrid')).strftime('%Y-%m-%d %H:%M')
-            update.message.reply_text(f"{i + 1}. {post['title']} programado para {local_time}")
-    else:
-        update.message.reply_text('No hay publicaciones programadas.')
+if scheduled_posts:
+recent_posts = heapq.nlargest(15, scheduled_posts, key=lambda x: x['schedule'])
+for i, post in enumerate(recent_posts):
+local_time = post['schedule'].astimezone(pytz.timezone('Europe/Madrid')).strftime('%Y-%m-%d %H:%M')
+update.message.reply_text(f"{i + 1}. {post['title']} programado para {local_time}")
+else:
+update.message.reply_text('No hay publicaciones programadas.')
 
 def delete_scheduled(update: Update, context: CallbackContext) -> None:
     try:
@@ -192,12 +185,12 @@ def help_command(update: Update, context: CallbackContext) -> None:
                               '/cancel - Cancelar la operación actual')
 
 def main() -> None:
-    updater = Updater(token=TOKEN)
-    dispatcher = updater.dispatcher
+updater = Updater(token=TOKEN)
+dispatcher = updater.dispatcher
 
-    global scheduler
-    scheduler = BackgroundScheduler()
-    scheduler.start()
+global scheduler
+scheduler = BackgroundScheduler()
+scheduler.start()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
