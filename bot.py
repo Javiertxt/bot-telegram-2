@@ -117,12 +117,12 @@ def schedule_post(data, immediate=False):
             })
     elif data['image_type'] == 'link':
         if immediate:
-            bot.send_message(chat_id=data['channel'], text=text + f"<a href='{data['image']}'>🟢</a>", parse_mode=ParseMode.HTML)
+            bot.send_message(chat_id=data['channel'], text=text, parse_mode=ParseMode.HTML)
         else:
             trigger = DateTrigger(run_date=data['schedule'], timezone=pytz.utc)
             scheduler.add_job(bot.send_message, trigger, kwargs={
                 'chat_id': data['channel'],
-                'text': text + f"<a href='{data['image']}'>🟢</a>",
+                'text': text,
                 'parse_mode': ParseMode.HTML
             })
 
